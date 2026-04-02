@@ -74,6 +74,21 @@ WORKDIR /var/www/html
 # Install Composer dependencies
 RUN composer install --no-dev
 
+# Download TDB patches at build time
+ARG TDB_PATCHES=1
+ARG TDB_PATCHES_GIT_URL=https://github.com/TrinityCore/TrinityCore.git
+ARG TDB_PATCHES_GIT_BRANCH=3.3.5
+ARG TDB_PATCHES_GIT_PATH=sql/updates/world/3.3.5
+RUN if [ "$TDB_PATCHES" = "1" ]; then \
+        git clone --depth 1 --single-branch --branch "$TDB_PATCHES_GIT_BRANCH" \
+            --filter=blob:none --sparse "$TDB_PATCHES_GIT_URL" /tmp/tc_patches \
+        && cd /tmp/tc_patches \
+        && git sparse-checkout set "$TDB_PATCHES_GIT_PATH" \
+        && mkdir -p /usr/local/share/tdb-patches \
+        && cp -r "$TDB_PATCHES_GIT_PATH"/. /usr/local/share/tdb-patches/ \
+        && rm -rf /tmp/tc_patches; \
+    fi
+
 # Copy entrypoint script and config template
 COPY docker-entrypoint.sh /usr/local/bin/
 COPY config.php.template /usr/local/share/

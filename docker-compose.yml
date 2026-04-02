@@ -24,6 +24,10 @@ services:
       args:
         AOWOW_GIT_URL: ${AOWOW_GIT_URL:-https://github.com/Sarjuuk/aowow.git}
         MPQEXTRACTOR_GIT_URL: ${MPQEXTRACTOR_GIT_URL:-https://github.com/Sarjuuk/MPQExtractor.git}
+        TDB_PATCHES: ${TDB_PATCHES:-1}
+        TDB_PATCHES_GIT_URL: ${TDB_PATCHES_GIT_URL:-https://github.com/TrinityCore/TrinityCore.git}
+        TDB_PATCHES_GIT_BRANCH: ${TDB_PATCHES_GIT_BRANCH:-3.3.5}
+        TDB_PATCHES_GIT_PATH: ${TDB_PATCHES_GIT_PATH:-sql/updates/world/3.3.5}
     container_name: aowow_web
     depends_on:
       db:
@@ -90,9 +94,6 @@ services:
       - AOWOW_CONVERSION_THREADS=${AOWOW_CONVERSION_THREADS:-0}
       # tdb patching
       - TDB_PATCHES=${TDB_PATCHES:-1}
-      - TDB_PATCHES_GIT_URL=${TDB_PATCHES_GIT_URL:-https://github.com/TrinityCore/TrinityCore.git}
-      - TDB_PATCHES_GIT_BRANCH=${TDB_PATCHES_GIT_BRANCH:-3.3.5}
-      - TDB_PATCHES_GIT_PATH=${TDB_PATCHES_GIT_PATH:-sql/updates/world/3.3.5}
       # other
       - WOW_LOCALE=${WOW_LOCALE:-enUS}
 

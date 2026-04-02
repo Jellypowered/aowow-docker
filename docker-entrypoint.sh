@@ -269,41 +269,25 @@ if [ "$WORLD_TABLES" -lt 5 ]; then
     # Check if we should apply TDB patches
     if [ "${TDB_PATCHES:-1}" = "1" ]; then
         print_info "Checking for TDB patches..."
-        TEMP_PATCH_DIR="/tmp/trinity_patches"
+        PATCH_PATH="/usr/local/share/tdb-patches"
 
-        # Cleanup potential previous run
-        rm -rf "$TEMP_PATCH_DIR"
+        if [ -d "$PATCH_PATH" ] && [ -n "$(ls -A "$PATCH_PATH" 2>/dev/null)" ]; then
+            PATCH_FILES=$(find "$PATCH_PATH" -name "*.sql" | sort)
 
-        print_info "Cloning TrinityCore repository (branch: ${TDB_PATCHES_GIT_BRANCH:-3.3.5})..."
-        # Clone single branch, depth 1 for speed
-        if git clone --depth 1 --single-branch --branch "${TDB_PATCHES_GIT_BRANCH:-3.3.5}" "${TDB_PATCHES_GIT_URL:-https://github.com/TrinityCore/TrinityCore.git}" "$TEMP_PATCH_DIR" >/dev/null 2>&1; then
+            if [ -n "$PATCH_FILES" ]; then
+                print_info "Found patches. Importing..."
 
-            PATCH_PATH="$TEMP_PATCH_DIR/${TDB_PATCHES_GIT_PATH:-sql/updates/world/3.3.5}"
+                echo "$PATCH_FILES" | while read -r patch_file; do
+                    print_info "  Applying patch: $(basename "$patch_file")"
+                    mysql -h"$WORLD_DB_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --skip-ssl "$WORLD_DB_DATABASE" < "$patch_file"
+                done
 
-            if [ -d "$PATCH_PATH" ]; then
-                PATCH_FILES=$(find "$PATCH_PATH" -name "*.sql" | sort)
-
-                if [ -n "$PATCH_FILES" ]; then
-                    print_info "Found patches in $PATCH_PATH. Importing..."
-
-                    # Execute each patch individually
-                    echo "$PATCH_FILES" | while read -r patch_file; do
-                        print_info "  Applying patch: $(basename "$patch_file")"
-                        mysql -h"$WORLD_DB_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --skip-ssl "$WORLD_DB_DATABASE" < "$patch_file"
-                    done
-
-                    print_success "Patches processed."
-                else
-                    print_error "No SQL files found in $PATCH_PATH"
-                fi
+                print_success "Patches processed."
             else
-                print_error "Patch path $PATCH_PATH does not exist in repository"
+                print_error "No SQL files found in $PATCH_PATH"
             fi
-
-            # Cleanup
-            rm -rf "$TEMP_PATCH_DIR"
         else
-            print_error "Failed to clone TrinityCore repository. Skipping patches."
+            print_info "No TDB patches found in image (built with TDB_PATCHES=0)."
         fi
     fi
 else
