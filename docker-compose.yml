@@ -109,3 +109,4 @@ networks:
   aowow_net:
     name: aowow_private_net
     driver: bridge
+    internal: true

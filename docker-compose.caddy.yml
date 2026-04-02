@@ -13,6 +13,7 @@ services:
       - caddy_config:/config
     networks:
       - aowow_net
+      - caddy_external
 
 volumes:
   caddy_data:
@@ -22,3 +23,5 @@ networks:
   aowow_net:
     external: true
     name: aowow_private_net
+  caddy_external:
+    driver: bridge
