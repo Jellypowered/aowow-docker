@@ -32,6 +32,61 @@ sort_mpqs() {
     sed 's/\.MPQ$/#MPQ/' | LC_COLLATE=C sort | sed 's/#MPQ$/.MPQ/'
 }
 
+# Case-insensitive merge: files in src supersede case-insensitively matching
+# files in dest. Each directory in dest is enumerated once and cached.
+declare -gA _CI_CACHE=()
+declare -gA _CI_POPULATED=()
+_CI_RESOLVED=""
+
+_ci_ensure_dir_cached() {
+    local dir="$1"
+    [[ -v _CI_POPULATED["$dir"] ]] && return
+    _CI_POPULATED["$dir"]=1
+    [ -d "$dir" ] || return 0
+    local entry
+    while IFS= read -r entry; do
+        _CI_CACHE["${dir}:${entry,,}"]="$dir/$entry"
+    done < <(ls "$dir" 2>/dev/null)
+}
+
+_ci_resolve_path() {
+    local current="$1"
+    local IFS='/'
+    local part
+    for part in $2; do
+        [ -z "$part" ] && continue
+        _ci_ensure_dir_cached "$current"
+        local key="${current}:${part,,}"
+        if [[ -v _CI_CACHE["$key"] ]]; then
+            current="${_CI_CACHE[$key]}"
+        else
+            current="$current/$part"
+        fi
+    done
+    _CI_RESOLVED="$current"
+}
+
+ci_merge() {
+    local src="$1" dest="$2"
+    _CI_CACHE=(); _CI_POPULATED=()
+    local src_file
+    while IFS= read -r src_file; do
+        local rel="${src_file#${src}/}"
+        _ci_resolve_path "$dest" "$rel"
+        # Skip zero-size files: they cannot supersede an existing file
+        if [ ! -s "$src_file" ] && [ -f "$_CI_RESOLVED" ]; then
+            rm -f "$src_file"
+            continue
+        fi
+        [ -f "$_CI_RESOLVED" ] && rm -f "$_CI_RESOLVED"
+        local dest_file="$dest/$rel"
+        mkdir -p "$(dirname "$dest_file")"
+        mv "$src_file" "$dest_file"
+        local fname="${rel##*/}"
+        _CI_CACHE["$(dirname "$dest_file"):${fname,,}"]="$dest_file"
+    done < <(find "$src" -type f)
+}
+
 # Configure PHP-FPM
 print_info "Configuring PHP-FPM..."
 FPM_CONF="/usr/local/etc/php-fpm.d/www.conf"
@@ -382,50 +437,15 @@ if [ "$PERFORM_EXTRACTION" = true ]; then
         exit 1
     fi
 
-    # Only extract Sound from base MPQs
-    COMMON_PATHS=("Sound")
-
     print_info "Phase 1a: Extracting base MPQs to $BASE_DIR..."
 
     echo "$BASE_MPQS" | while read -r mpq; do
         MPQ_NAME=$(basename "$mpq")
         print_info "  Processing base MPQ: $MPQ_NAME"
-        for path in "${COMMON_PATHS[@]}"; do
-            print_info "    Extracting: $path"
-            MPQExtractor -e "$path/*" -o "$BASE_DIR" -f "$mpq" || true
-        done
-    done
-
-    # 1b. First Locale Sound (Treating as Base)
-    FIRST_LOCALE="${VALID_LOCALES[0]}"
-    LOC_DIR="/wow-client/Data/$FIRST_LOCALE"
-    print_info "Phase 1b: Extracting sound from first locale ($FIRST_LOCALE) to base..."
-
-    FIRST_LOCALE_MPQS=""
-    FIRST_LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "locale-$FIRST_LOCALE*.MPQ" | sort_mpqs)"$'\n'
-    FIRST_LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "speech-$FIRST_LOCALE*.MPQ" | sort_mpqs)"$'\n'
-    FIRST_LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "expansion-locale-$FIRST_LOCALE*.MPQ" | sort_mpqs)"$'\n'
-    FIRST_LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "expansion-speech-$FIRST_LOCALE*.MPQ" | sort_mpqs)"$'\n'
-    FIRST_LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "lichking-locale-$FIRST_LOCALE*.MPQ" | sort_mpqs)"$'\n'
-    FIRST_LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "lichking-speech-$FIRST_LOCALE*.MPQ" | sort_mpqs)"$'\n'
-    FIRST_LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "patch-$FIRST_LOCALE*.MPQ" | sort_mpqs)"$'\n'
-    # Others
-    FIRST_LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "*.MPQ" \
-        ! -name "locale-$FIRST_LOCALE*.MPQ" \
-        ! -name "speech-$FIRST_LOCALE*.MPQ" \
-        ! -name "expansion-locale-$FIRST_LOCALE*.MPQ" \
-        ! -name "expansion-speech-$FIRST_LOCALE*.MPQ" \
-        ! -name "lichking-locale-$FIRST_LOCALE*.MPQ" \
-        ! -name "lichking-speech-$FIRST_LOCALE*.MPQ" \
-        ! -name "patch-$FIRST_LOCALE*.MPQ" | sort_mpqs)"
-
-    FIRST_LOCALE_MPQS=$(echo "$FIRST_LOCALE_MPQS" | sed '/^$/d')
-
-    echo "$FIRST_LOCALE_MPQS" | while read -r mpq; do
-        MPQ_NAME=$(basename "$mpq")
-        print_info "  Processing first locale MPQ for sound: $MPQ_NAME"
-        print_info "    Extracting: Sound"
-        MPQExtractor -e "Sound/*" -o "$BASE_DIR" -f "$mpq" || true
+        MPQ_TEMP=$(mktemp -d /var/www/html/setup/mpqdata/tmp.XXXXXX)
+        MPQExtractor -e "Sound/*" -o "$MPQ_TEMP" -f "$mpq" || true
+        ci_merge "$MPQ_TEMP" "$BASE_DIR"
+        rm -rf "$MPQ_TEMP"
     done
 
     print_success "Base extraction complete."
@@ -467,11 +487,6 @@ if [ "$PERFORM_EXTRACTION" = true ]; then
     # 3-4. Locale Processing Loop
     # ---------------------------------------------------------
 
-    SPECIFIC_PATHS=(
-        "DBFilesClient"
-        "Interface"
-    )
-
     for locale in "${VALID_LOCALES[@]}"; do
         LOCALE_DIR="/var/www/html/setup/mpqdata/$locale"
         print_info "Starting processing for locale: $locale"
@@ -491,46 +506,31 @@ if [ "$PERFORM_EXTRACTION" = true ]; then
 
         LOC_DIR="/wow-client/Data/$locale"
         LOCALE_MPQS=""
+        LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "base-$locale*.MPQ" | sort_mpqs)"$'\n'
+        LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "backup-$locale*.MPQ" | sort_mpqs)"$'\n'
         LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "locale-$locale*.MPQ" | sort_mpqs)"$'\n'
         LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "speech-$locale*.MPQ" | sort_mpqs)"$'\n'
         LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "expansion-locale-$locale*.MPQ" | sort_mpqs)"$'\n'
         LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "expansion-speech-$locale*.MPQ" | sort_mpqs)"$'\n'
         LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "lichking-locale-$locale*.MPQ" | sort_mpqs)"$'\n'
         LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "lichking-speech-$locale*.MPQ" | sort_mpqs)"$'\n'
-        LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "patch-$locale*.MPQ" | sort_mpqs)"$'\n'
-        # Others
-        LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "*.MPQ" \
-            ! -name "locale-$locale*.MPQ" \
-            ! -name "speech-$locale*.MPQ" \
-            ! -name "expansion-locale-$locale*.MPQ" \
-            ! -name "expansion-speech-$locale*.MPQ" \
-            ! -name "lichking-locale-$locale*.MPQ" \
-            ! -name "lichking-speech-$locale*.MPQ" \
-            ! -name "patch-$locale*.MPQ" | sort_mpqs)"
+        LOCALE_MPQS+="$(find "$LOC_DIR" -maxdepth 1 -name "patch-$locale*.MPQ" | sort_mpqs)"
 
         LOCALE_MPQS=$(echo "$LOCALE_MPQS" | sed '/^$/d')
 
         echo "$LOCALE_MPQS" | while read -r mpq; do
             MPQ_NAME=$(basename "$mpq")
             print_info "    Processing locale MPQ: $MPQ_NAME"
-            for path in "${SPECIFIC_PATHS[@]}"; do
-                if [[ "$path" == *".lua" ]]; then
-                    SEARCH_PATTERN="$path"
-                else
-                    SEARCH_PATTERN="$path/*"
-                fi
-                MPQExtractor -e "$SEARCH_PATTERN" -o "$TEMP_DIR" -f "$mpq" || true
-            done
+            MPQ_TEMP=$(mktemp -d /var/www/html/setup/mpqdata/tmp.XXXXXX)
+            MPQExtractor -e "Sound/*" -e "DBFilesClient/*" -e "Interface/*" -o "$MPQ_TEMP" -f "$mpq" || true
+            ci_merge "$MPQ_TEMP" "$TEMP_DIR"
+            rm -rf "$MPQ_TEMP"
         done
 
-        # Clean 0-byte files from temp
-        print_info "    Cleaning 0-byte files..."
-        find "$TEMP_DIR" -type f -size 0 -delete
-
-        # Merge temp to locale, breaking hardlinks with --remove-destination
+        # Merge temp to locale, case-insensitively breaking hardlinks
         print_info "    Merging files to locale directory..."
-        if [ -n "$(ls -A $TEMP_DIR 2>/dev/null)" ]; then
-            cp -r --remove-destination "$TEMP_DIR/"* "$LOCALE_DIR/"
+        if [ -n "$(ls -A "$TEMP_DIR" 2>/dev/null)" ]; then
+            ci_merge "$TEMP_DIR" "$LOCALE_DIR"
         fi
 
         # Cleanup temp dir
