@@ -2,7 +2,7 @@
 set -e
 
 echo "============================================"
-echo "AoWoW Installation Setup"
+echo "AoWoW Deployment Setup"
 echo "============================================"
 
 # Color codes for output
@@ -178,16 +178,10 @@ fi
 
 print_success "All specified locales validated: ${VALID_LOCALES[*]}"
 
-# Check if TDB SQL file exists
+# Verify world/auth/characters databases are reachable
+# (they are externally managed by AzerothCore — do NOT create or modify them)
 echo ""
-print_info "Checking for TrinityCore Database (TDB) SQL file..."
-if [ ! -f "/tdb/TDB.sql" ]; then
-    print_error "TDB SQL file not found at /tdb/TDB.sql!"
-    print_error "Please mount your TDB_full_world_335.25101_2025_10_21.sql file"
-    print_error "Example: -v /path/to/TDB.sql:/tdb/TDB.sql:ro"
-    exit 1
-fi
-print_success "TDB SQL file found"
+print_info "Verifying external AzerothCore database connectivity..."
 
 # Wait for database to be ready
 echo ""
@@ -198,40 +192,35 @@ until mysql -h"$AOWOW_DB_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --skip-ssl -e "SE
 done
 print_success "Database is ready"
 
-# Create databases and users if they don't exist
+# Create AoWoW database and user (AoWoW owns this database)
 echo ""
-print_info "Setting up databases and users..."
+print_info "Setting up AoWoW database and user..."
 
-# Create AoWoW database and user
 mysql -h"$AOWOW_DB_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --skip-ssl <<EOF
 CREATE DATABASE IF NOT EXISTS \`$AOWOW_DB_DATABASE\`;
 CREATE USER IF NOT EXISTS '$AOWOW_DB_USER'@'%' IDENTIFIED BY '$AOWOW_DB_PASSWORD';
 GRANT ALL PRIVILEGES ON \`$AOWOW_DB_DATABASE\`.* TO '$AOWOW_DB_USER'@'%';
-EOF
-
-# Create World database and user
-mysql -h"$WORLD_DB_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --skip-ssl <<EOF
-CREATE DATABASE IF NOT EXISTS \`$WORLD_DB_DATABASE\`;
-CREATE USER IF NOT EXISTS '$WORLD_DB_USER'@'%' IDENTIFIED BY '$WORLD_DB_PASSWORD';
-GRANT SELECT ON \`$WORLD_DB_DATABASE\`.* TO '$WORLD_DB_USER'@'%';
-EOF
-
-# Create Auth database and user
-mysql -h"$AUTH_DB_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --skip-ssl <<EOF
-CREATE DATABASE IF NOT EXISTS \`$AUTH_DB_DATABASE\`;
-CREATE USER IF NOT EXISTS '$AUTH_DB_USER'@'%' IDENTIFIED BY '$AUTH_DB_PASSWORD';
-GRANT SELECT ON \`$AUTH_DB_DATABASE\`.* TO '$AUTH_DB_USER'@'%';
-EOF
-
-# Create Characters database and user
-mysql -h"$CHARACTERS_DB_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --skip-ssl <<EOF
-CREATE DATABASE IF NOT EXISTS \`$CHARACTERS_DB_DATABASE\`;
-CREATE USER IF NOT EXISTS '$CHARACTERS_DB_USER'@'%' IDENTIFIED BY '$CHARACTERS_DB_PASSWORD';
-GRANT SELECT ON \`$CHARACTERS_DB_DATABASE\`.* TO '$CHARACTERS_DB_USER'@'%';
 FLUSH PRIVILEGES;
 EOF
 
-print_success "Databases and users created"
+print_success "AoWoW database and user created"
+
+# Verify external AzerothCore databases are reachable
+# (world, auth, characters are externally managed — do NOT create or modify them)
+for DB_HOST_VAR in AOWOW_DB_HOST WORLD_DB_HOST AUTH_DB_HOST CHARACTERS_DB_HOST; do
+    eval "DB_HOST=\${$DB_HOST_VAR}"
+    case "$DB_HOST_VAR" in
+        AOWOW_DB_HOST)  DB_NAME="$AOWOW_DB_DATABASE";  DB_USER="$AOWOW_DB_USER";  DB_PASS="$AOWOW_DB_PASSWORD" ;;
+        WORLD_DB_HOST)  DB_NAME="$WORLD_DB_DATABASE";  DB_USER="$WORLD_DB_USER";  DB_PASS="$WORLD_DB_PASSWORD" ;;
+        AUTH_DB_HOST)   DB_NAME="$AUTH_DB_DATABASE";   DB_USER="$AUTH_DB_USER";   DB_PASS="$AUTH_DB_PASSWORD" ;;
+        CHARACTERS_DB_HOST) DB_NAME="$CHARACTERS_DB_DATABASE"; DB_USER="$CHARACTERS_DB_USER"; DB_PASS="$CHARACTERS_DB_PASSWORD" ;;
+    esac
+    if ! mysql -h"$DB_HOST" -u"$DB_USER" -p"$DB_PASS" --skip-ssl -e "SELECT 1" "$DB_NAME" >/dev/null 2>&1; then
+        print_error "Cannot connect to $DB_NAME at $DB_HOST — check credentials and network"
+        exit 1
+    fi
+    print_success "Connected to $DB_NAME at $DB_HOST"
+done
 
 # Check if AoWoW database initialization is needed
 echo ""
@@ -308,45 +297,6 @@ EOF
     print_success "AoWoW database structure initialized and configured"
 else
     print_success "AoWoW database already initialized"
-fi
-
-# Check if TDB needs to be imported
-echo ""
-print_info "Checking World database (TDB) status..."
-WORLD_TABLES=$(mysql -h"$WORLD_DB_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --skip-ssl "$WORLD_DB_DATABASE" -e "SHOW TABLES;" 2>/dev/null | wc -l)
-
-if [ "$WORLD_TABLES" -lt 5 ]; then
-    print_info "World database appears empty. Importing TDB..."
-    print_info "This will take several minutes..."
-    mysql -h"$WORLD_DB_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --skip-ssl "$WORLD_DB_DATABASE" < /tdb/TDB.sql
-    print_success "TDB imported successfully"
-
-    # Check if we should apply TDB patches
-    if [ "${TDB_PATCHES:-1}" = "1" ]; then
-        print_info "Checking for TDB patches..."
-        PATCH_PATH="/usr/local/share/tdb-patches"
-
-        if [ -d "$PATCH_PATH" ] && [ -n "$(ls -A "$PATCH_PATH" 2>/dev/null)" ]; then
-            PATCH_FILES=$(find "$PATCH_PATH" -name "*.sql" | sort)
-
-            if [ -n "$PATCH_FILES" ]; then
-                print_info "Found patches. Importing..."
-
-                echo "$PATCH_FILES" | while read -r patch_file; do
-                    print_info "  Applying patch: $(basename "$patch_file")"
-                    mysql -h"$WORLD_DB_HOST" -uroot -p"$MYSQL_ROOT_PASSWORD" --skip-ssl "$WORLD_DB_DATABASE" < "$patch_file"
-                done
-
-                print_success "Patches processed."
-            else
-                print_error "No SQL files found in $PATCH_PATH"
-            fi
-        else
-            print_info "No TDB patches found in image (built with TDB_PATCHES=0)."
-        fi
-    fi
-else
-    print_success "World database already populated"
 fi
 
 # Determine number of threads
@@ -636,7 +586,7 @@ fi
 
 echo ""
 echo "============================================"
-print_success "Setup validation complete!"
+print_success "Deployment setup complete!"
 echo "============================================"
 
 # Final Configuration cleanup (Maintenance Mode OFF, Debug OFF)
@@ -648,10 +598,10 @@ EOF
 print_success "Maintenance mode disabled and debug level set to 0."
 
 print_info "Databases configured:"
-print_info "  - AoWoW:      $AOWOW_DB_HOST/$AOWOW_DB_DATABASE"
-print_info "  - World:      $WORLD_DB_HOST/$WORLD_DB_DATABASE"
-print_info "  - Auth:       $AUTH_DB_HOST/$AUTH_DB_DATABASE"
-print_info "  - Characters: $CHARACTERS_DB_HOST/$CHARACTERS_DB_DATABASE"
+print_info "  - AoWoW (own):    $AOWOW_DB_HOST/$AOWOW_DB_DATABASE"
+print_info "  - World (AC):     $WORLD_DB_HOST/$WORLD_DB_DATABASE"
+print_info "  - Auth (AC):      $AUTH_DB_HOST/$AUTH_DB_DATABASE"
+print_info "  - Characters (AC): $CHARACTERS_DB_HOST/$CHARACTERS_DB_DATABASE"
 print_info ""
 print_info "Web interface will be available on port ${WEB_PORT:-8080}"
 print_info ""

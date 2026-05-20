@@ -24,10 +24,6 @@ services:
       args:
         AOWOW_GIT_URL: ${AOWOW_GIT_URL:-https://github.com/Sarjuuk/aowow.git}
         MPQEXTRACTOR_GIT_URL: ${MPQEXTRACTOR_GIT_URL:-https://github.com/Sarjuuk/MPQExtractor.git}
-        TDB_PATCHES: ${TDB_PATCHES:-1}
-        TDB_PATCHES_GIT_URL: ${TDB_PATCHES_GIT_URL:-https://github.com/TrinityCore/TrinityCore.git}
-        TDB_PATCHES_GIT_BRANCH: ${TDB_PATCHES_GIT_BRANCH:-3.3.5}
-        TDB_PATCHES_GIT_PATH: ${TDB_PATCHES_GIT_PATH:-sql/updates/world/3.3.5}
     container_name: aowow_web
     depends_on:
       db:
@@ -39,8 +35,6 @@ services:
     volumes:
       # user-provided wow client files (read-only)
       - ${WOW_CLIENT_PATH}:/wow-client:ro
-      # user-provided tdb sql file (read-only)
-      - ${TDB_SQL_PATH}:/tdb/TDB.sql:ro
       # persistent application data
       - aowow_web_cache:/var/www/html/cache:rw
       - aowow_web_config:/var/www/html/config:rw
@@ -92,8 +86,6 @@ services:
       - FPM_REQUEST_TERMINATE_TIMEOUT=${FPM_REQUEST_TERMINATE_TIMEOUT:-0}
       # threads
       - AOWOW_CONVERSION_THREADS=${AOWOW_CONVERSION_THREADS:-0}
-      # tdb patching
-      - TDB_PATCHES=${TDB_PATCHES:-1}
       # other
       - WOW_LOCALE=${WOW_LOCALE:-enUS}
 
@@ -109,4 +101,3 @@ networks:
   aowow_net:
     name: aowow_private_net
     driver: bridge
-    internal: true
