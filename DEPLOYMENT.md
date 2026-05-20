@@ -58,19 +58,21 @@ All credentials are configured via `.env` (copy from `.env.example`).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `WORLD_DB_HOST` | `host.docker.internal` | External AC world DB host |
-| `WORLD_DB_DATABASE` | `world` | AC world database name |
+| `WORLD_DB_DATABASE` | `acore_world` | AC world database name |
 | `WORLD_DB_USER` | `world_user` | Read-only AC world user |
 | `WORLD_DB_PASSWORD` | `world_password` | AC world password |
 | `AUTH_DB_HOST` | `host.docker.internal` | External AC auth DB host |
-| `AUTH_DB_DATABASE` | `auth` | AC auth database name |
+| `AUTH_DB_DATABASE` | `acore_auth` | AC auth database name |
 | `AUTH_DB_USER` | `auth_user` | Read-only AC auth user |
 | `AUTH_DB_PASSWORD` | `auth_password` | AC auth password |
 | `CHARACTERS_DB_HOST` | `host.docker.internal` | External AC characters DB host |
-| `CHARACTERS_DB_DATABASE` | `characters` | AC characters database name |
+| `CHARACTERS_DB_DATABASE` | `acore_characters` | AC characters database name |
 | `CHARACTERS_DB_USER` | `characters_user` | Read-only AC characters user |
 | `CHARACTERS_DB_PASSWORD` | `characters_password` | AC characters password |
 
 **Note:** The defaults use `host.docker.internal` because world/auth/characters databases are external to the compose stack. If your AzerothCore runs on a different host or network, update these values accordingly.
+
+If AzCoreWeb is already configured, copy the matching database host/user/password values from `/bulk/Source/AzCoreWeb/backend/.env`. The expected AzerothCore database names in this workspace are `acore_world`, `acore_auth`, and `acore_characters`.
 
 ### Root Credentials (for AoWoW DB creation only)
 
@@ -210,15 +212,15 @@ Edit `.env` and set:
 WOW_CLIENT_PATH=/path/to/your/wow-3.3.5a
 WOW_LOCALE=enUS
 WORLD_DB_HOST=<your-ac-world-db-host>
-WORLD_DB_DATABASE=world
+WORLD_DB_DATABASE=acore_world
 WORLD_DB_USER=<readonly-world-user>
 WORLD_DB_PASSWORD=<world-password>
 AUTH_DB_HOST=<your-ac-auth-db-host>
-AUTH_DB_DATABASE=auth
+AUTH_DB_DATABASE=acore_auth
 AUTH_DB_USER=<readonly-auth-user>
 AUTH_DB_PASSWORD=<auth-password>
 CHARACTERS_DB_HOST=<your-ac-characters-db-host>
-CHARACTERS_DB_DATABASE=characters
+CHARACTERS_DB_DATABASE=acore_characters
 CHARACTERS_DB_USER=<readonly-characters-user>
 CHARACTERS_DB_PASSWORD=<characters-password>
 ```
@@ -253,10 +255,8 @@ docker compose exec web php aowow --setup
 
 Follow the interactive prompts. When you reach the database test screen:
 - AoWoW DB should show `OK`
-- World DB should show `OK` or `WARN` (not `ERR`)
 - Auth DB should show `OK`
-
-**Note:** The ACDB vendor-prefix rejection has been removed. A `WARN` with version info is acceptable. `ERR` means credentials or host are unreachable, or the world DB lacks a `version` table — investigate the error message.
+- World DB may show `OK`, `WARN`, or `ERR` — the ACDB vendor-prefix rejection has been removed, so the setup no longer blocks on `ACDB` strings. However, schema or version-table issues specific to your AzerothCore deployment may still surface as `WARN` or `ERR`. Investigate the error message and verify the world DB has a `version` table with a `cache_id` column.
 
 ### Step 5 — Disable Maintenance Mode
 
@@ -303,7 +303,7 @@ curl -s -o /dev/null -w "%{http_code}" https://localhost
 |------|-----------------|--------------|
 | 2 | Build completes, containers start, no `ERROR` in compose output | `ERROR` in compose output, container exits immediately |
 | 3 | Logs show `Deployment setup complete!` | Logs show `Cannot connect to ... — check credentials and network` |
-| 4 | All three DBs show `OK` or `WARN` (not `ERR`) | Any DB shows `ERR` — credentials or host unreachable |
+| 4 | AoWoW and Auth show `OK`; World DB may show `OK`, `WARN`, or `ERR` — ACDB vendor-prefix rejection is gone, but schema/version-table issues may still surface | Any DB shows `ERR` — investigate the error message; may be credentials, host, or schema/version-table issue |
 | 5 | No error output from the command | Error about missing config key |
 | 6 | HTTP status `200` | `000` (connection refused), `502` (upstream down), `404` |
 | 7 | HTML contains realm names from your AC `realmlist` | Empty page, or SQL error in HTML |
