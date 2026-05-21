@@ -88,7 +88,7 @@ RUN sed -i '/php_value/d' /var/www/html/.htaccess \
 
 # Create necessary directories with correct permissions
 RUN mkdir -p \
-    cache \
+    cache/template \
     config \
     static/download \
     static/widgets \
