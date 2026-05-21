@@ -30,8 +30,8 @@ services:
         condition: service_healthy
     # Ports are commented out to force traffic through Caddy via the private network.
     # If you need direct access for debugging, uncomment the next two lines:
-    # ports:
-    #   - "${WEB_PORT:-8080}:80"
+    ports:
+      - "${WEB_PORT:-8080}:80"
     volumes:
       # user-provided wow client files (read-only)
       - ${WOW_CLIENT_PATH}:/wow-client:ro

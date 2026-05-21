@@ -36,21 +36,19 @@ RUN git clone --recurse-submodules ${MPQEXTRACTOR_GIT_URL} MPQExtractor \
     && cp bin/MPQExtractor /usr/local/bin/ \
     && cd /tmp && rm -rf MPQExtractor
 
-# Install PHP extensions
+# Install PHP extensions (intl disabled due to incompatibility with this AoWoW fork)
 RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
     && docker-php-ext-install -j$(nproc) \
     gd \
     mysqli \
     pdo_mysql \
     mbstring \
-    intl \
     gmp \
     zip \
     && docker-php-ext-enable \
     gd \
     mysqli \
     mbstring \
-    intl \
     gmp \
     zip
 
@@ -63,7 +61,7 @@ RUN a2enmod rewrite proxy proxy_fcgi
 COPY 000-default.conf /etc/apache2/sites-available/000-default.conf
 
 # Clone AoWoW repository
-ARG AOWOW_GIT_URL=https://github.com/Sarjuuk/aowow.git
+ARG AOWOW_GIT_URL=https://github.com/Jellypowered/aowow.git
 WORKDIR /var/www
 RUN rm -rf html && \
     git clone ${AOWOW_GIT_URL} html
@@ -71,13 +69,22 @@ RUN rm -rf html && \
 # Set working directory
 WORKDIR /var/www/html
 
-# Install Composer dependencies
-RUN composer install --no-dev
+# Install Composer dependencies (skip if no composer.json — Jellypowered/aowow is self-contained)
+RUN if [ -f composer.json ]; then composer install --no-dev; else echo "No composer.json found, skipping composer install"; fi
 
 # Copy entrypoint script and config template
 COPY docker-entrypoint.sh /usr/local/bin/
 COPY config.php.template /usr/local/share/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Remove php_value directives from .htaccess (incompatible with mod_proxy_fcgi + PHP-FPM)
+# Add SSL disable options to Mysqli.php (host MySQL uses self-signed cert)
+RUN sed -i '/php_value/d' /var/www/html/.htaccess \
+    && sed -i '/mysqli_set_charset/a\
+        if ($this->link) {\
+            mysqli_options($this->link, MYSQLI_OPT_SSL_VERIFY_SERVER_CERT, 0);\
+            mysqli_options($this->link, MYSQLI_OPT_CONNECT_TIMEOUT, 5);\
+        }' /var/www/html/includes/libs/DbSimple/Mysqli.php
 
 # Create necessary directories with correct permissions
 RUN mkdir -p \

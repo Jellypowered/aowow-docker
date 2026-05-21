@@ -231,7 +231,7 @@ if [ "$DB_TABLES" -lt 5 ]; then
     print_info "AoWoW database appears empty. Running initialization..."
 
     # Import all SQL files in the setup directory
-    for sql_file in /var/www/html/setup/sql/*.sql; do
+    for sql_file in /var/www/html/setup/*.sql; do
         if [ -f "$sql_file" ]; then
             # Skip files with "mysql_only" in the name
             if [[ "$sql_file" == *"mysql_only"* ]]; then

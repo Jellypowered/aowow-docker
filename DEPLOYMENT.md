@@ -161,6 +161,14 @@ SITE_HOST=your-domain.com/aowow
 STATIC_HOST=your-domain.com/aowow/static
 ```
 
+### Proxy Integration — Cross-Origin-Resource-Policy
+
+When AoWoW is proxied through a reverse proxy or application server that adds security headers (e.g., `Cross-Origin-Resource-Policy: same-origin`), the proxy **must strip** the CORP header from proxied responses.
+
+**Why:** AoWoW's `SITE_HOST` is hardcoded to the public URL (e.g., `your-domain.com/aowow`). All internal asset URLs reference that host. If a user accesses AoWoW via a different origin (e.g., `your-domain.com:8080`), the browser will try to load assets from `your-domain.com/aowow/static/...`. A `Cross-Origin-Resource-Policy: same-origin` header on those responses blocks the cross-origin load, breaking the page.
+
+**Fix:** The proxy handler must call `res.removeHeader('Cross-Origin-Resource-Policy')` after setting upstream headers. This is implemented in the AzCoreWeb proxy at `/bulk/Source/AzCoreWeb/backend/src/main.ts`.
+
 ### Standalone Deployment
 
 If AoWoW runs on its own domain, no subpath configuration is needed:
